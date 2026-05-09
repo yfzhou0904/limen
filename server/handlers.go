@@ -13,27 +13,22 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 const maxUpload = 32 << 20 // 32 MiB
 
-func materialsHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		mats, err := listMaterials()
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		writeJSON(w, mats)
-	case http.MethodPost:
-		uploadMaterial(w, r)
-	default:
-		http.Error(w, "method not allowed", 405)
+func listMaterialsHandler(w http.ResponseWriter, r *http.Request) {
+	mats, err := listMaterials()
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
 	}
+	writeJSON(w, mats)
 }
 
-func uploadMaterial(w http.ResponseWriter, r *http.Request) {
+func uploadMaterialHandler(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(maxUpload); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
@@ -125,10 +120,6 @@ func uploadMaterial(w http.ResponseWriter, r *http.Request) {
 }
 
 func materialNoteHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
-		return
-	}
 	var in struct {
 		Title   string `json:"title"`
 		Content string `json:"content"`
@@ -162,10 +153,6 @@ func materialNoteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func materialURLHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
-		return
-	}
 	var in struct {
 		URL   string `json:"url"`
 		Title string `json:"title"`
@@ -211,120 +198,121 @@ func materialURLHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, m)
 }
 
-// /api/materials/{id}                  -> GET material metadata
-// /api/materials/{id}/content          -> GET raw markdown (for note/webpage)
-// /api/materials/{id}/pages/{n}.pdf    -> GET single page bytes
-// /api/materials/{id}/pages/{n}.md     -> GET single page markdown
-func materialItemHandler(w http.ResponseWriter, r *http.Request) {
-	rest := strings.TrimPrefix(r.URL.Path, "/api/materials/")
-	parts := strings.Split(rest, "/")
-	if len(parts) == 0 || parts[0] == "" {
-		http.Error(w, "bad path", 400)
-		return
-	}
-	id := parts[0]
+func loadMaterial(w http.ResponseWriter, r *http.Request) (Material, bool) {
+	id := chi.URLParam(r, "id")
 	m, err := getMaterial(id)
 	if err == sql.ErrNoRows {
 		http.Error(w, "not found", 404)
-		return
+		return m, false
 	}
 	if err != nil {
 		http.Error(w, err.Error(), 500)
-		return
+		return m, false
 	}
+	return m, true
+}
 
-	if len(parts) == 1 {
-		switch r.Method {
-		case http.MethodGet:
-			writeJSON(w, m)
-		case http.MethodPatch:
-			var in struct {
-				Title string `json:"title"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-				http.Error(w, err.Error(), 400)
-				return
-			}
-			title := strings.TrimSpace(in.Title)
-			if title == "" {
-				http.Error(w, "title required", 400)
-				return
-			}
-			if err := updateMaterialTitle(id, title); err != nil {
-				http.Error(w, err.Error(), 500)
-				return
-			}
-			m.Title = title
-			writeJSON(w, m)
-		case http.MethodDelete:
-			if err := deleteMaterial(id); err != nil {
-				http.Error(w, err.Error(), 500)
-				return
-			}
-			// best-effort: also remove the blob dir
-			_ = blobDeleteDir(fmt.Sprintf("materials/%s", id))
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			http.Error(w, "method not allowed", 405)
-		}
+func getMaterialHandler(w http.ResponseWriter, r *http.Request) {
+	m, ok := loadMaterial(w, r)
+	if !ok {
 		return
 	}
-	switch parts[1] {
-	case "content":
-		b, err := blobGet(fmt.Sprintf("materials/%s/content.md", m.ID))
+	writeJSON(w, m)
+}
+
+func patchMaterialHandler(w http.ResponseWriter, r *http.Request) {
+	m, ok := loadMaterial(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		http.Error(w, "title required", 400)
+		return
+	}
+	if err := updateMaterialTitle(m.ID, title); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	m.Title = title
+	writeJSON(w, m)
+}
+
+func deleteMaterialHandler(w http.ResponseWriter, r *http.Request) {
+	m, ok := loadMaterial(w, r)
+	if !ok {
+		return
+	}
+	if err := deleteMaterial(m.ID); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	_ = blobDeleteDir(fmt.Sprintf("materials/%s", m.ID))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func materialContentHandler(w http.ResponseWriter, r *http.Request) {
+	m, ok := loadMaterial(w, r)
+	if !ok {
+		return
+	}
+	b, err := blobGet(fmt.Sprintf("materials/%s/content.md", m.ID))
+	if err != nil {
+		http.Error(w, err.Error(), 404)
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Write(b)
+}
+
+// page param looks like "3.pdf" or "3.md"
+func materialPageHandler(w http.ResponseWriter, r *http.Request) {
+	m, ok := loadMaterial(w, r)
+	if !ok {
+		return
+	}
+	fname := chi.URLParam(r, "page")
+	dot := strings.LastIndex(fname, ".")
+	if dot < 1 {
+		http.Error(w, "bad page", 400)
+		return
+	}
+	n, err := strconv.Atoi(fname[:dot])
+	if err != nil || n < 1 || n > m.PageCount {
+		http.Error(w, "bad page number", 400)
+		return
+	}
+	ext := fname[dot+1:]
+	switch ext {
+	case "pdf":
+		b, err := blobGet(fmt.Sprintf("materials/%s/page_%d.pdf", m.ID, n))
+		if err != nil {
+			http.Error(w, err.Error(), 404)
+			return
+		}
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Write(b)
+	case "md":
+		b, err := blobGet(fmt.Sprintf("materials/%s/page_%d.md", m.ID, n))
 		if err != nil {
 			http.Error(w, err.Error(), 404)
 			return
 		}
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 		w.Write(b)
-	case "pages":
-		if len(parts) < 3 {
-			http.Error(w, "missing page", 400)
-			return
-		}
-		fname := parts[2]
-		dot := strings.LastIndex(fname, ".")
-		if dot < 1 {
-			http.Error(w, "bad page", 400)
-			return
-		}
-		n, err := strconv.Atoi(fname[:dot])
-		if err != nil || n < 1 || n > m.PageCount {
-			http.Error(w, "bad page number", 400)
-			return
-		}
-		ext := fname[dot+1:]
-		switch ext {
-		case "pdf":
-			b, err := blobGet(fmt.Sprintf("materials/%s/page_%d.pdf", m.ID, n))
-			if err != nil {
-				http.Error(w, err.Error(), 404)
-				return
-			}
-			w.Header().Set("Content-Type", "application/pdf")
-			w.Write(b)
-		case "md":
-			b, err := blobGet(fmt.Sprintf("materials/%s/page_%d.md", m.ID, n))
-			if err != nil {
-				http.Error(w, err.Error(), 404)
-				return
-			}
-			w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-			w.Write(b)
-		default:
-			http.Error(w, "ext must be pdf or md", 400)
-		}
 	default:
-		http.Error(w, "unknown subresource", 404)
+		http.Error(w, "ext must be pdf or md", 400)
 	}
 }
 
 func askHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
-		return
-	}
 	var in struct {
 		Question string `json:"question"`
 	}
@@ -374,10 +362,6 @@ func runAgentForRequest(reqID, question string) {
 }
 
 func requestsHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", 405)
-		return
-	}
 	rs, err := listRequests()
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -386,44 +370,38 @@ func requestsHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, rs)
 }
 
-func requestItemHandler(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/requests/")
-	if id == "" || strings.Contains(id, "/") {
-		http.Error(w, "bad path", 400)
+func getRequestHandler(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	req, err := getRequest(id)
+	if err == sql.ErrNoRows {
+		http.Error(w, "not found", 404)
 		return
 	}
-	switch r.Method {
-	case http.MethodGet:
-		req, err := getRequest(id)
-		if err == sql.ErrNoRows {
-			http.Error(w, "not found", 404)
-			return
-		}
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		out := map[string]any{
-			"id":         req.ID,
-			"prompt":     req.Prompt,
-			"status":     req.Status,
-			"error":      req.Error,
-			"created_at": req.CreatedAt,
-			"events":     req.Events,
-		}
-		if req.Response != "" {
-			out["response"] = json.RawMessage(req.Response)
-		}
-		writeJSON(w, out)
-	case http.MethodDelete:
-		if err := deleteRequest(id); err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	default:
-		http.Error(w, "method not allowed", 405)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
 	}
+	out := map[string]any{
+		"id":         req.ID,
+		"prompt":     req.Prompt,
+		"status":     req.Status,
+		"error":      req.Error,
+		"created_at": req.CreatedAt,
+		"events":     req.Events,
+	}
+	if req.Response != "" {
+		out["response"] = json.RawMessage(req.Response)
+	}
+	writeJSON(w, out)
+}
+
+func deleteRequestHandler(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := deleteRequest(id); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func deriveTitle(md, fallback string) string {

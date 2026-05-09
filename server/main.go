@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	_ "modernc.org/sqlite"
 )
 
@@ -36,21 +38,34 @@ func main() {
 		log.Printf("reconcile stale requests: %v", err)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/materials", materialsHandler)
-	mux.HandleFunc("/api/materials/url", materialURLHandler)
-	mux.HandleFunc("/api/materials/note", materialNoteHandler)
-	mux.HandleFunc("/api/materials/", materialItemHandler)
-	mux.HandleFunc("/api/ask", askHandler)
-	mux.HandleFunc("/api/requests", requestsHandler)
-	mux.HandleFunc("/api/requests/", requestItemHandler)
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+
+	r.Route("/api", func(r chi.Router) {
+		r.Get("/materials", listMaterialsHandler)
+		r.Post("/materials", uploadMaterialHandler)
+		r.Post("/materials/url", materialURLHandler)
+		r.Post("/materials/note", materialNoteHandler)
+		r.Get("/materials/{id}", getMaterialHandler)
+		r.Patch("/materials/{id}", patchMaterialHandler)
+		r.Delete("/materials/{id}", deleteMaterialHandler)
+		r.Get("/materials/{id}/content", materialContentHandler)
+		r.Get("/materials/{id}/pages/{page}", materialPageHandler)
+		r.Post("/ask", askHandler)
+		r.Get("/requests", requestsHandler)
+		r.Get("/requests/{id}", getRequestHandler)
+		r.Delete("/requests/{id}", deleteRequestHandler)
+	})
 
 	sub, _ := fs.Sub(distFS, "dist")
-	mux.Handle("/", spaHandler(sub))
+	r.Mount("/", spaHandler(sub))
 
-	var handler http.Handler = mux
+	var handler http.Handler = r
 	if code := os.Getenv("ACCESS_CODE"); code != "" {
-		handler = basicAuth(code, mux)
+		handler = basicAuth(code, r)
 	}
 
 	addr := getenv("ADDR", ":8080")

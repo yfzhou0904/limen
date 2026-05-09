@@ -1,53 +1,25 @@
 # Evaluation
 
-How we judge whether the system is actually useful, given that the corpus is small and the agent is the retrieval mechanism.
+How I'd judge whether this is actually useful.
 
-## Three dimensions, scored per case
+## Three things to score per question
 
-For each test case, score 0 / 0.5 / 1 on each dimension by reading the trace (`request_events`) and the final `submit_response`.
+- **Answer quality** — correct, grounded in what was read, no fabrication.
+- **Context selection** — `used_items` contains the obviously-relevant materials, nothing irrelevant.
+- **Failure handling** — when info is missing, `missing_context` says what specifically; `next_actions` are useful.
 
-| Dimension | 1 (pass) | 0.5 | 0 |
-|---|---|---|---|
-| **Answer quality** | Correct, grounded in cited materials, no fabricated facts. | Mostly correct but adds claims not supported by what was read. | Wrong, or the agent invented sources. |
-| **Context selection** | `used_items` contains every gold material; nothing irrelevant. | Misses one expected material, or pads with unrelated ones. | Misses the obviously-relevant material; cites paths not in workspace. |
-| **Failure handling** | When info is genuinely missing, `missing_context` says so specifically and `next_actions` are useful. | Vague "more info needed" without naming what. | Pretends the workspace was sufficient when it wasn't, or returns empty boilerplate. |
+## Cases (against the LLM workspace)
 
-## Test cases (against the curated LLM workspace)
+1. **Factual.** *"Why is attention O(n²)?"* → cites the Attention paper, `missing_context` empty.
+2. **Synthesis.** *"Summarize what I know about long-context inference cost; what's missing?"* → cites ≥3 materials, real gap in `missing_context`, 2–3 concrete `next_actions`.
+3. **Out-of-scope.** *"What's the latest on Mamba?"* → refuses or gives a short answer; flags the missing topic. Watch: agent must not fabricate from related material.
 
-Each case is a fixed prompt + a gold expectation. Pass criteria = ≥0.5 on every dimension and 1 on at least two.
+## What to watch for in the trace
 
-1. **Well-grounded factual.** *"Why is standard attention O(n²) in sequence length?"*
-   Gold `used_items`: Attention Is All You Need (specific page with the QK^T formula). Gold `missing_context`: empty.
+- **No `submit_response`** — event `reason: end_turn_without_submit`.
+- **`max_turns` hit** — agent is reading too much.
+- **Hallucinated citation** — `used_items[*].path` doesn't resolve in the VFS (UI shows a broken citation).
+- **Empty `missing_context` on a clearly partial answer** — overconfidence.
+- **Wrong modality** — agent reads `page_N.md` when the question needs the `.pdf` figure.
 
-2. **Synthesis across materials** (mirrors the homework use case).
-   *"Summarize my current understanding of long-context inference cost. What's missing? What should I read or do next?"*
-   Gold `used_items`: ≥3 of {FlashAttention-2, vLLM, prompt caching, Character.AI blog}. Gold `next_actions`: 2–3 concrete reads or experiments. Gold `missing_context`: at least one real gap (e.g. "no benchmarks on your specific hardware").
-
-3. **Out-of-scope question.** *"What's the latest on Mamba and state-space models?"*
-   Workspace has nothing on SSMs. Gold: short answer or refusal; `missing_context` names the missing topic; `next_actions` suggests adding an SSM paper. Failure mode to catch: agent fabricates an answer from related material.
-
-4. **Figure / equation question.** *"Walk me through the FlashAttention tiling diagram."*
-   Gold trace: agent calls `read` on a `.pdf` page (not just the OCR `.md`), since the diagram is visual. Gold `used_items`: cites `notes/flashattention-2/page_N` with a real page number.
-
-5. **Partial-coverage comparison.** *"How does vLLM's PagedAttention compare to FlashAttention?"*
-   Gold `used_items`: both papers. Gold answer: real comparison, not a side-by-side restatement. Gold `missing_context` if no benchmark numbers are present in the corpus.
-
-## Failure modes to watch for in the trace
-
-- **No `submit_response`** — agent ends with prose. Caught by the loop's `synthesized: true, reason: end_turn_without_submit` event.
-- **`max_turns` exhaustion** — `reason: max_turns`. Usually means the agent is stuck reading too much.
-- **Hallucinated citation** — `used_items[*].path` resolves to nothing in `loadVFS`. `resolveUsedTitles` will leave `Title` and `MaterialID` blank; the UI renders unresolved citations as broken.
-- **Empty `missing_context` on a gappy answer** — symptom of overconfidence. Hard to detect mechanically; caught by manual review against case 3 / 5.
-- **Single-material bias** — agent reads one file and answers; check `used_items.length` against gold for synthesis cases.
-- **Wrong modality** — agent reads `page_N.md` for a figure-heavy question instead of `page_N.pdf`. Caught by case 4.
-
-## How to run
-
-1. Load the curated LLM workspace (the 7 materials listed in the design doc's example, plus your own "what I think I know so far" note).
-2. For each case, paste the prompt into Ask, wait for `ready`, then open the request to view the trace.
-3. Score the three dimensions by hand. Total score = average across cases.
-4. Re-run after any prompt or tool change. The trace is fully replayable from `request_events`, so old runs stay auditable.
-
-## If this scaled up
-
-Swap manual scoring for an LLM grader: feed it the case prompt, the gold expectations, and the agent's `submit_response`, and ask for the same three 0/0.5/1 scores plus a short note. The rubric stays the same; only the grader changes.
+Score by hand from `request_events`. The rubric is small enough to swap manual scoring for an LLM grader later if it ever matters.
