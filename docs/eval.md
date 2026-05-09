@@ -43,7 +43,7 @@ Each case is a fixed prompt + a gold expectation. Pass criteria = ≥0.5 on ever
 
 ## How to run
 
-1. Load the 8-material LLM workspace (see `docs/dataset.md`).
+1. Load the curated LLM workspace (the 7 materials listed in the design doc's example, plus your own "what I think I know so far" note).
 2. For each case, paste the prompt into Ask, wait for `ready`, then open the request to view the trace.
 3. Score the three dimensions by hand. Total score = average across cases.
 4. Re-run after any prompt or tool change. The trace is fully replayable from `request_events`, so old runs stay auditable.

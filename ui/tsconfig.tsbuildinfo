@@ -1,1 +1,0 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/components/addmaterial.tsx","./src/components/askpanel.tsx","./src/components/markdown.tsx","./src/components/materiallist.tsx","./src/components/materialviewer.tsx","./src/components/requesthistory.tsx","./src/components/requestview.tsx","./src/lib/api.ts","./src/lib/trace.ts","./src/lib/types.ts"],"version":"5.9.3"}
