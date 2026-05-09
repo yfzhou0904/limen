@@ -1,0 +1,9 @@
+.git
+data
+ui/node_modules
+ui/dist
+server/dist
+server/server
+server/data.db*
+*.db
+.env
