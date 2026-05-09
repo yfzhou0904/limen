@@ -58,11 +58,11 @@ export function RequestView({ req }: { req: RequestRecord }) {
             <div className="answer"><Markdown content={req.response.answer} /></div>
           </div>
           <div className="card used">
-            <h2>Used materials ({req.response.used_items.length})</h2>
-            {req.response.used_items.length === 0 ? (
+            <h2>Used materials ({(req.response.used_items ?? []).length})</h2>
+            {(req.response.used_items ?? []).length === 0 ? (
               <div className="why">none</div>
             ) : (
-              req.response.used_items.map((u, i) => {
+              (req.response.used_items ?? []).map((u, i) => {
                 const m = mats.data?.find((x) => x.id === u.material_id);
                 const label = `${u.title || u.material_id}${u.page ? ` (p. ${u.page})` : ""}`;
                 return (
@@ -86,10 +86,10 @@ export function RequestView({ req }: { req: RequestRecord }) {
           </div>
           <div className="card missing">
             <h2>Missing context</h2>
-            {req.response.missing_context.length === 0 ? (
+            {(req.response.missing_context ?? []).length === 0 ? (
               <div className="why">none reported</div>
             ) : (
-              req.response.missing_context.map((mc, i) => (
+              (req.response.missing_context ?? []).map((mc, i) => (
                 <div key={i} style={{ marginBottom: 8 }}>
                   <b>{mc.what}</b>
                   <div className="why">→ {mc.suggestion}</div>
@@ -100,7 +100,7 @@ export function RequestView({ req }: { req: RequestRecord }) {
           <div className="card next">
             <h2>Next actions</h2>
             <ol style={{ margin: 0, paddingLeft: 20 }}>
-              {req.response.next_actions.map((a, i) => (
+              {(req.response.next_actions ?? []).map((a, i) => (
                 <li key={i}>{a}</li>
               ))}
             </ol>

@@ -78,6 +78,7 @@ button.ghost {
   padding: 8px 12px;
   cursor: pointer;
   border: 0;
+  border-radius: 0;
   background: none;
   color: var(--mute);
   border-bottom: 2px solid transparent;
@@ -148,8 +149,8 @@ details summary { cursor: pointer; color: var(--mute); font-size: 12px; }
 .row-action { background: none; border: none; color: #6b7280; font-size: 12px; cursor: pointer; padding: 0 4px; }
 .row-action:hover { color: #111; text-decoration: underline; }
 .rename-input { font: inherit; padding: 2px 4px; width: 100%; box-sizing: border-box; }
-.item-title { cursor: text; }
 .history-head { cursor: pointer; }
+.history-head:hover .item-title { text-decoration: underline; }
 .badge.status-pending, .badge.status-running { background: #dbeafe; color: #1e40af; }
 .badge.status-ready { background: #dcfce7; color: #166534; }
 .badge.status-error { background: #fee2e2; color: #991b1b; }
